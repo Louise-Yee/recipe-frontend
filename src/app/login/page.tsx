@@ -139,18 +139,6 @@ export default function Login() {
                     p: 4,
                     background: '#fff', // Off-white background
                     position: 'relative',
-                    // // Optional: add a subtle gradient overlay for extra depth
-                    // '&::before': {
-                    //     content: '""',
-                    //     position: 'absolute',
-                    //     top: 0,
-                    //     left: 0,
-                    //     right: 0,
-                    //     bottom: 0,
-                    //     background:
-                    //         'linear-gradient(135deg, rgba(0,0,0, 0.1) 0%, rgba(255, 149, 0, 0.3) 100%)',
-                    //     zIndex: 0,
-                    // },
                 }}
             >
                 {/* Glassy login form */}
@@ -198,7 +186,7 @@ export default function Login() {
                     <form onSubmit={handleLogin}>
                         <TextField
                             fullWidth
-                            label="Email Address"
+                            label="Email Address or Username"
                             variant="outlined"
                             margin="normal"
                             value={email}
