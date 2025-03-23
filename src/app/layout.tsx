@@ -1,15 +1,15 @@
+// src/app/layout.tsx
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
+import MuiProvider from "@/components/MuiProvider";
+import { AuthProvider } from "@/context/AuthContext";
+import { Toaster } from "react-hot-toast";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+// Import your local font
+const overusedGrotesk = localFont({
+  src: "../../public/font/OverusedGrotesk-VF.woff2",
+  variable: "--font-overused-grotesk",
 });
 
 export const metadata: Metadata = {
@@ -19,15 +19,16 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        {children}
+      <body className={`${overusedGrotesk.variable} antialiased`}>
+        <AuthProvider>
+          <MuiProvider>
+            {children}
+            <Toaster />
+          </MuiProvider>
+        </AuthProvider>
       </body>
     </html>
   );
