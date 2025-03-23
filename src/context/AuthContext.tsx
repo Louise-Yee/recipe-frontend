@@ -4,8 +4,17 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { errorHandler } from '@/helper/helper';
+import { auth }  from '@/config/firebase'; // Import from config file
+import {
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    signOut,
+    UserCredential
+} from 'firebase/auth';
 
-// Expanded user interface for a recipe sharing platform
+
+
+// User interface for a recipe sharing platform
 interface User {
     uid: string;
     displayName: string;
@@ -23,7 +32,7 @@ interface AuthContextType {
     isLoading: boolean;
     isAuthenticated: boolean;
     signUp: (email: string, password: string, username: string, firstName: string, lastName: string) => Promise<void>;
-    login: (email: string, password: string) => Promise<void>;
+    login: (usernameOrEmail: string, password: string) => Promise<void>;
     logout: () => void;
     updateProfile: (profileData: Partial<User>) => Promise<void>;
     checkAuthStatus: () => void;
@@ -68,6 +77,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         localStorage.setItem(STORAGE_KEYS.LAST_ACTIVITY, Date.now().toString());
     };
 
+    // Helper function to determine if input is an email
+    const isEmail = (input: string): boolean => {
+        return /\S+@\S+\.\S+/.test(input);
+    };
+
     // API request helper with auth token
     const authFetch = async (endpoint: string, options: RequestInit = {}) => {
         const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
@@ -96,18 +110,31 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
                 return;
             }
 
-            // Validate token with backend (optional but recommended)
+            // Validate token with backend 
             try {
-                const response = await authFetch('/auth/me');
+                const response = await authFetch('/me');
                 if (!response.ok) {
                     throw new Error('Invalid token');
                 }
                 // Update user data from backend
-                const freshUserData = await response.json();
+                const data = await response.json();
+
+                const freshUserData: User = {
+                    uid: data.user.uid,
+                    displayName: data.user.displayName,
+                    email: data.user.email,
+                    username: data.user.username || data.user.email.split('@')[0],
+                    profileImage: data.user.profileImage,
+                    bio: data.user.bio || '',
+                    followersCount: data.user.followersCount || 0,
+                    followingCount: data.user.followingCount || 0,
+                    recipesCount: data.user.recipesCount || 0
+                };
+
                 setUser(freshUserData);
                 localStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(freshUserData));
             } catch (error) {
-                errorHandler(error, "checkAuthStatus", "Invalid Token")
+                errorHandler(error, "checkAuthStatus", "Invalid Token");
                 // If token validation fails, fallback to stored user data
                 const parsedUser = JSON.parse(userData);
                 setUser(parsedUser);
@@ -122,37 +149,64 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         }
     };
 
-    // Handle login
-    const login = async (email: string, password: string) => {
+    // Handle login with username or email
+    const login = async (usernameOrEmail: string, password: string) => {
         setIsLoading(true);
         try {
-            const response = await fetch(`${apiUrl}/auth/login`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email, password }),
+            let userCredential: UserCredential;
+
+            // If this is an email, use Firebase auth directly
+            if (isEmail(usernameOrEmail)) {
+                userCredential = await signInWithEmailAndPassword(auth, usernameOrEmail, password);
+            } else {
+                // If it's a username, we need to get the email from the backend
+                const response = await fetch(`${apiUrl}/users/by-username`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: usernameOrEmail })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Invalid username or password');
+                }
+
+                const data = await response.json();
+                // Now use the email with Firebase Auth
+                userCredential = await signInWithEmailAndPassword(auth, data.email, password);
+            }
+
+            // Get ID token
+            const idToken = await userCredential.user.getIdToken();
+
+            // Store token
+            localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, idToken);
+
+            // Fetch user details from backend
+            const response = await fetch(`${apiUrl}/me`, {
+                headers: {
+                    'Authorization': `Bearer ${idToken}`
+                }
             });
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || "Login failed");
+                throw new Error('Failed to fetch user details');
             }
 
-            const data = await response.json();
+            const userData = await response.json();
 
             const user: User = {
-                uid: data.localId,
-                displayName: data.displayName || email.split('@')[0],
-                email: data.email,
-                username: data.username || email.split('@')[0],
-                profileImage: data.profileImage,
-                bio: data.bio,
-                followersCount: data.followersCount || 0,
-                followingCount: data.followingCount || 0,
-                recipesCount: data.recipesCount || 0
+                uid: userData.user.uid,
+                displayName: userData.user.displayName || userCredential.user.email?.split('@')[0] || '',
+                email: userData.user.email,
+                username: userData.user.username || userData.user.email.split('@')[0],
+                profileImage: userData.user.profileImage,
+                bio: userData.user.bio || '',
+                followersCount: userData.user.followersCount || 0,
+                followingCount: userData.user.followingCount || 0,
+                recipesCount: userData.user.recipesCount || 0
             };
 
-            // Store auth data in localStorage
-            localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, data.idToken);
+            // Store user data
             localStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(user));
             updateLastActivity();
 
@@ -176,49 +230,66 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     ) => {
         setIsLoading(true);
         try {
-            const displayName = `${firstName} ${lastName}`;
+            // Create user in Firebase Auth
+            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+            const firebaseUser = userCredential.user;
 
-            const response = await fetch(`${apiUrl}/auth/signup`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
+            // Get ID token
+            const idToken = await firebaseUser.getIdToken();
+
+            // Store token temporarily
+            localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, idToken);
+
+            // Create user profile in your backend
+            const displayName = `${firstName} ${lastName}`.trim();
+
+            const response = await fetch(`${apiUrl}/users`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
                 body: JSON.stringify({
                     email,
-                    password,
                     username,
-                    displayName,
                     firstName,
-                    lastName
-                }),
+                    lastName,
+                    displayName
+                })
             });
 
             if (!response.ok) {
+                // If backend creation fails, delete the Firebase user
+                try {
+                    await firebaseUser.delete();
+                } catch (deleteError) {
+                    console.error('Error deleting Firebase user after failed signup:', deleteError);
+                }
+
                 const errorData = await response.json();
-                throw new Error(errorData.error || "Signup failed");
+                throw new Error(errorData.error || 'Failed to create user profile');
             }
 
-            const data = await response.json();
+            // const data = await response.json();
 
             const newUser: User = {
-                uid: data.localId || data.uid,
-                displayName: data.displayName || displayName,
-                email: data.email,
-                username: data.username || username,
-                profileImage: data.profileImage,
-                bio: data.bio || '',
+                uid: firebaseUser.uid,
+                displayName: displayName,
+                email: email,
+                username: username,
+                profileImage: '',
+                bio: '',
                 followersCount: 0,
                 followingCount: 0,
                 recipesCount: 0
             };
 
+            // Store user data
             localStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(newUser));
-
-            if (data.idToken) {
-                localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, data.idToken);
-            }
+            updateLastActivity();
 
             setUser(newUser);
-            updateLastActivity();
-            router.push("/onboarding");
+            router.push("/dashboard"); // or "/onboarding" if you have that route
         } catch (error) {
             errorHandler(error, "signUp", "AuthContext");
             throw error;
@@ -262,9 +333,16 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
     // Handle logout
     const handleLogout = () => {
+        // Sign out from Firebase
+        signOut(auth).catch(error => {
+            console.error('Error signing out from Firebase:', error);
+        });
+
+        // Clear local storage
         localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
         localStorage.removeItem(STORAGE_KEYS.USER_DATA);
         localStorage.removeItem(STORAGE_KEYS.LAST_ACTIVITY);
+
         setUser(null);
     };
 
