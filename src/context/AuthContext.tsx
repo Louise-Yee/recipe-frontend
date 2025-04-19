@@ -4,7 +4,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { errorHandler } from '@/helper/helper';
-import { auth }  from '@/config/firebase'; // Import from config file
+import { auth } from '@/config/firebase'; // Import from config file
 import {
     signInWithEmailAndPassword,
     createUserWithEmailAndPassword,
@@ -41,14 +41,15 @@ interface AuthContextType {
 // Create the context with a default value
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Session timeout in milliseconds (1 hour for longer browsing sessions)
-const SESSION_TIMEOUT = 60 * 60 * 1000;
+// Session timeout in milliseconds (1 hour to match backend cookie)
+const SESSION_TIMEOUT = 3600000; // 1 hour
 
 // Local storage keys for better organization
 const STORAGE_KEYS = {
     AUTH_TOKEN: 'recipePlatform_authToken',
     USER_DATA: 'recipePlatform_userData',
-    LAST_ACTIVITY: 'recipePlatform_lastActivity'
+    LAST_ACTIVITY: 'recipePlatform_lastActivity',
+    SESSION_EXPIRY: 'recipePlatform_sessionExpiry'
 };
 
 interface AuthProviderProps {
@@ -62,17 +63,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     const [isLoading, setIsLoading] = useState(true);
     const router = useRouter();
 
-    // Session management functions
-    const isSessionExpired = (): boolean => {
-        const lastActivityTime = localStorage.getItem(STORAGE_KEYS.LAST_ACTIVITY);
-        if (!lastActivityTime) return true;
-
-        const currentTime = Date.now();
-        const timeSinceLastActivity = currentTime - parseInt(lastActivityTime, 10);
-
-        return timeSinceLastActivity > SESSION_TIMEOUT;
-    };
-
     const updateLastActivity = () => {
         localStorage.setItem(STORAGE_KEYS.LAST_ACTIVITY, Date.now().toString());
     };
@@ -84,66 +74,68 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
     // API request helper with auth token
     const authFetch = async (endpoint: string, options: RequestInit = {}) => {
-        const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-
-        const headers = {
-            'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-            ...options.headers
-        };
-
         return fetch(`${apiUrl}${endpoint}`, {
             ...options,
-            headers
+            credentials: 'include', // Send cookies with the request
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
         });
+    };
+
+    // Check if session is valid
+    const checkSession = async () => {
+        try {
+            const currentUser = auth.currentUser;
+            if (!currentUser) return false;
+
+            const idToken = await currentUser.getIdToken();
+            const response = await fetch(`${apiUrl}/auth/session`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ idToken }),
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                throw new Error('Session invalid');
+            }
+
+            const data = await response.json();
+            setUser(data.user);
+
+            // Update session expiry time
+            const expiryTime = Date.now() + SESSION_TIMEOUT;
+            localStorage.setItem(STORAGE_KEYS.SESSION_EXPIRY, expiryTime.toString());
+
+            return true;
+        } catch (error) {
+            console.error('Session check failed:', error);
+            return false;
+        }
     };
 
     // Check authentication status
     const checkAuthStatus = async () => {
         setIsLoading(true);
-        try {
-            const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-            const userData = localStorage.getItem(STORAGE_KEYS.USER_DATA);
 
-            if (!token || !userData || isSessionExpired()) {
-                handleLogout();
+        try {
+            const currentUser = auth.currentUser;
+
+            if (!currentUser) {
+                setUser(null);
+                setIsLoading(false);
                 return;
             }
 
-            // Validate token with backend 
-            try {
-                const response = await authFetch('/me');
-                if (!response.ok) {
-                    throw new Error('Invalid token');
-                }
-                // Update user data from backend
-                const data = await response.json();
-
-                const freshUserData: User = {
-                    uid: data.user.uid,
-                    displayName: data.user.displayName,
-                    email: data.user.email,
-                    username: data.user.username || data.user.email.split('@')[0],
-                    profileImage: data.user.profileImage,
-                    bio: data.user.bio || '',
-                    followersCount: data.user.followersCount || 0,
-                    followingCount: data.user.followingCount || 0,
-                    recipesCount: data.user.recipesCount || 0
-                };
-
-                setUser(freshUserData);
-                localStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(freshUserData));
-            } catch (error) {
-                errorHandler(error, "checkAuthStatus", "Invalid Token");
-                // If token validation fails, fallback to stored user data
-                const parsedUser = JSON.parse(userData);
-                setUser(parsedUser);
+            const sessionValid = await checkSession();
+            if (!sessionValid) {
+                await handleLogout();
             }
-
-            updateLastActivity();
         } catch (error) {
             errorHandler(error, "checkAuthStatus", "AuthContext");
-            handleLogout();
+            setUser(null);
         } finally {
             setIsLoading(false);
         }
@@ -155,11 +147,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         try {
             let userCredential: UserCredential;
 
-            // If this is an email, use Firebase auth directly
             if (isEmail(usernameOrEmail)) {
                 userCredential = await signInWithEmailAndPassword(auth, usernameOrEmail, password);
             } else {
-                // If it's a username, we need to get the email from the backend
                 const response = await fetch(`${apiUrl}/users/by-username`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -171,47 +161,27 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
                 }
 
                 const data = await response.json();
-                // Now use the email with Firebase Auth
                 userCredential = await signInWithEmailAndPassword(auth, data.email, password);
             }
 
-            // Get ID token
             const idToken = await userCredential.user.getIdToken();
 
-            // Store token
-            localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, idToken);
-
-            // Fetch user details from backend
-            const response = await fetch(`${apiUrl}/me`, {
-                headers: {
-                    'Authorization': `Bearer ${idToken}`
-                }
+            const sessionResponse = await fetch(`${apiUrl}/auth/session`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ idToken }),
+                credentials: 'include'
             });
 
-            if (!response.ok) {
-                throw new Error('Failed to fetch user details');
+            if (!sessionResponse.ok) {
+                throw new Error('Failed to establish session');
             }
 
-            const userData = await response.json();
-
-            const user: User = {
-                uid: userData.user.uid,
-                displayName: userData.user.displayName || userCredential.user.email?.split('@')[0] || '',
-                email: userData.user.email,
-                username: userData.user.username || userData.user.email.split('@')[0],
-                profileImage: userData.user.profileImage,
-                bio: userData.user.bio || '',
-                followersCount: userData.user.followersCount || 0,
-                followingCount: userData.user.followingCount || 0,
-                recipesCount: userData.user.recipesCount || 0
-            };
-
-            // Store user data
-            localStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(user));
+            const userData = await sessionResponse.json();
+            setUser(userData.user);
             updateLastActivity();
 
-            setUser(user);
-            router.push("/dashboard");
+            router.replace("/home"); // Use replace instead of push
         } catch (error) {
             errorHandler(error, "login", "AuthContext");
             throw error;
@@ -290,7 +260,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             updateLastActivity();
 
             setUser(newUser);
-            router.push("/dashboard"); // or "/onboarding" if you have that route
+            router.push("/home"); // or "/onboarding" if you have that route
         } catch (error) {
             errorHandler(error, "signUp", "AuthContext");
             throw error;
@@ -332,36 +302,53 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         }
     };
 
-    // Handle logout
-    const handleLogout = () => {
-        // Sign out from Firebase
-        signOut(auth).catch(error => {
-            console.error('Error signing out from Firebase:', error);
-        });
-
-        // Clear local storage
-        localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
-        localStorage.removeItem(STORAGE_KEYS.USER_DATA);
-        localStorage.removeItem(STORAGE_KEYS.LAST_ACTIVITY);
-
-        setUser(null);
+    // Handle logout (internal function)
+    const handleLogout = async () => {
+        try {
+            await signOut(auth);
+            await fetch(`${apiUrl}/auth/logout`, {
+                method: 'POST',
+                credentials: 'include'
+            });
+            localStorage.clear(); // Clear all storage to be safe
+            setUser(null);
+        } catch (error) {
+            console.error("Error signing out:", error);
+        }
     };
 
+    // Public logout function
     const logout = () => {
         handleLogout();
-        router.push('/login');
+        router.replace("/login"); // Use replace instead of push
     };
 
-    // Initialize auth status check
+    // Initialize auth check and keep it updated
     useEffect(() => {
-        checkAuthStatus();
+        let authStateUnsubscribe = () => { };
+
+        const setupAuthListener = () => {
+            authStateUnsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
+                if (firebaseUser) {
+                    await checkAuthStatus();
+                } else {
+                    setUser(null);
+                    setIsLoading(false);
+                }
+            });
+        };
+
+        setupAuthListener();
+        return () => authStateUnsubscribe();
     }, []);
 
     // Set up activity tracking to update last activity time
     useEffect(() => {
         if (!user) return;
 
-        const handleActivity = () => updateLastActivity();
+        const handleActivity = () => {
+            updateLastActivity();
+        };
 
         // Add event listeners for user activity
         window.addEventListener('mousedown', handleActivity);
@@ -369,11 +356,18 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         window.addEventListener('touchstart', handleActivity);
         window.addEventListener('scroll', handleActivity);
 
-        // Session expiration check
-        const intervalId = setInterval(() => {
-            if (user && isSessionExpired()) {
-                console.log('Session expired, logging out');
-                logout();
+        // Check session validity every minute
+        const intervalId = setInterval(async () => {
+            const sessionExpiry = localStorage.getItem(STORAGE_KEYS.SESSION_EXPIRY);
+            const currentTime = Date.now();
+
+            // If session is about to expire in 5 minutes or has expired, check session
+            if (sessionExpiry && (currentTime + 300000 > parseInt(sessionExpiry))) {
+                const isValid = await checkSession();
+                if (!isValid) {
+                    console.log('Session expired, logging out');
+                    logout();
+                }
             }
         }, 60000); // Check every minute
 

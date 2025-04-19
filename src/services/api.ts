@@ -1,49 +1,146 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// src/services/api.ts
-const BASE_URL =
-  "https://us-central1-cloud-recipe-coursework.cloudfunctions.net/api";
+const apiUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
 
-interface ApiOptions {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
-  body?: any;
-  headers?: Record<string, string>;
+export interface Recipe {
+  id?: string;
+  title: string;
+  description?: string;
+  ingredients: string[];
+  steps: string[];
+  cookTime?: number;
+  servings?: number;
+  imageUrl?: string;
+  author?: {
+    displayName?: string;
+  };
 }
 
-export async function fetchApi<T>(
-  endpoint: string,
-  options: ApiOptions = {}
-): Promise<T> {
-  const { method = "GET", body, headers = {} } = options;
+export interface ApiResponse<T> {
+  recipe?: T;
+  recipes?: T[];
+  error?: string;
+}
 
-  const defaultHeaders = {
-    "Content-Type": "application/json",
-    ...headers,
-  };
-
-  const response = await fetch(`${BASE_URL}${endpoint}`, {
-    method,
-    headers: defaultHeaders,
-    body: body ? JSON.stringify(body) : undefined,
+export const createRecipe = async (recipeData: Recipe) => {
+  const response = await fetch(`${apiUrl}/recipes`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(recipeData),
   });
 
   if (!response.ok) {
-    const error = await response
-      .json()
-      .catch(() => ({ message: "An unknown error occurred" }));
-    throw new Error(error.message || `API error: ${response.status}`);
+    const error = await response.json();
+    throw new Error(error.error || "Failed to create recipe");
   }
 
   return response.json();
-}
+};
 
-// Example service functions
-export const userService = {
-  getUsers: () => fetchApi<any[]>("/users"),
-  getUserById: (id: string) => fetchApi<any>(`/users/${id}`),
-  createUser: (userData: any) =>
-    fetchApi<any>("/users", {
+export const getUserRecipes = async () => {
+  const response = await fetch(`${apiUrl}/recipes/user`, {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to fetch recipes");
+  }
+
+  return response.json();
+};
+
+export const getAllRecipes = async () => {
+  const response = await fetch(`${apiUrl}/recipes`, {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to fetch recipes");
+  }
+
+  return response.json();
+};
+
+export const getRecipeById = async (
+  id: string
+): Promise<ApiResponse<Recipe>> => {
+  const response = await fetch(`${apiUrl}/recipes/${id}`, {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to fetch recipe");
+  }
+
+  return response.json();
+};
+
+export const uploadImage = async (file: File) => {
+  if (!file) {
+    throw new Error("No file provided");
+  }
+
+  // Validate file type
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Only image files are allowed");
+  }
+
+  // Validate file size
+  if (file.size > 5 * 1024 * 1024) {
+    throw new Error("File size exceeds 5MB limit");
+  }
+
+  try {
+    // Create a new FormData instance
+    const formData = new FormData();
+
+    // Append the file with the field name expected by the backend
+    formData.append("image", file);
+
+    console.log("Uploading image with direct method:", {
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: `${(file.size / 1024).toFixed(2)} KB`,
+    });
+
+    // Send the request to the new direct upload endpoint
+    const response = await fetch(`${apiUrl}/upload-image`, {
       method: "POST",
-      body: userData,
-    }),
-  // Add more methods as needed
+      credentials: "include", // For cookies
+      body: formData,
+      // Let the browser set the correct Content-Type for multipart/form-data
+    });
+
+    // Handle non-successful responses
+    if (!response.ok) {
+      let errorMessage = "Failed to upload image";
+
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorData.message || errorMessage;
+        console.error("Upload error:", errorData);
+      } catch (e: any) {
+        const errorText = await response.text();
+        console.error("Upload error (text):", errorText);
+        errorMessage = errorText || `Server error (${response.status})`;
+        console.log(e);
+      }
+
+      throw new Error(errorMessage);
+    }
+
+    // Parse successful response
+    const result = await response.json();
+    console.log("Upload success:", result);
+    return result;
+  } catch (error) {
+    // Re-throw with better message
+    console.error("Image upload failed:", error);
+    throw error instanceof Error ? error : new Error("Failed to upload image");
+  }
 };
