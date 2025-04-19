@@ -1,36 +1,192 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Recipe Sharing Platform - Frontend
 
-## Getting Started
+This repository contains the frontend code for a recipe sharing platform built with Next.js and Material UI. The application allows users to browse, create, update, and share recipes.
 
-First, run the development server:
+## Features
+
+- User authentication (sign up, login, logout)
+- Create and edit recipes with images, ingredients, and step-by-step instructions
+- Browse and search for recipes
+- Responsive design for mobile and desktop
+
+## Tech Stack
+
+- [Next.js 15](https://nextjs.org/) - React framework
+- [Material UI](https://mui.com/) - Component library
+- [Firebase Authentication](https://firebase.google.com/docs/auth) - User authentication
+- [Firebase Storage](https://firebase.google.com/docs/storage) - Image storage
+- [Firebase Hosting](https://firebase.google.com/docs/hosting) - Deployment platform
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed:
+- [Node.js](https://nodejs.org/) (v18 or higher)
+- [npm](https://www.npmjs.com/) (v8 or higher)
+- [Firebase CLI](https://firebase.google.com/docs/cli) (`npm install -g firebase-tools`)
+
+## Environment Setup
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Louise-Yee/recipe-frontend.git
+   cd recipe-frontend
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Create a `.env.local` file in the project root with the following configuration:
+   ```
+   NEXT_PUBLIC_BACKEND_URL=https://your-backend-url.com/api
+   NEXT_PUBLIC_FIREBASE_API_KEY=your-api-key
+   NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project-id.firebaseapp.com
+   NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
+   NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project-id.appspot.com
+   NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your-messaging-sender-id
+   NEXT_PUBLIC_FIREBASE_APP_ID=your-app-id
+   ```
+
+## Local Development
+
+Run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser to see the application.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Building for Production
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+To create a production build:
 
-## Learn More
+```bash
+npm run build
+```
 
-To learn more about Next.js, take a look at the following resources:
+This command will create a static export in the `out` directory which can be deployed to Firebase Hosting.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+To preview the production build locally:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm run start
+```
 
-## Deploy on Vercel
+## Deployment to Firebase Hosting
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Manual Deployment
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Login to Firebase:
+   ```bash
+   firebase login
+   ```
+
+2. Initialize Firebase in your project (if not already done):
+   ```bash
+   firebase init
+   ```
+   - Select 'Hosting' when prompted for features
+   - Select your Firebase project
+   - Specify `out` as your public directory
+   - Configure as a single-page app: `Yes`
+   - Set up automatic builds and deploys with GitHub: `No` (you can set this up later)
+
+3. Build your project:
+   ```bash
+   npm run build
+   ```
+
+4. Deploy to Firebase:
+   ```bash
+   firebase deploy
+   ```
+
+### Automated Deployment with GitHub Actions
+
+This project includes a GitHub Actions workflow for automated deployments when you push to the master branch.
+
+1. Add Firebase secrets to your GitHub repository:
+   - Go to your repository on GitHub
+   - Navigate to Settings > Secrets > Actions
+   - Add the following secrets:
+     - `NEXT_PUBLIC_FIREBASE_API_KEY`
+     - `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
+     - `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
+     - `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`
+     - `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
+     - `NEXT_PUBLIC_FIREBASE_APP_ID`
+     - `FIREBASE_SERVICE_ACCOUNT_YOUR_PROJECT_ID` (Generate this using Firebase CLI)
+
+2. Generate a Firebase service account key:
+   ```bash
+   firebase login:ci
+   ```
+   Copy the token and add it as a secret named `FIREBASE_SERVICE_ACCOUNT_YOUR_PROJECT_ID` in your GitHub repository.
+
+3. Push your code to the master branch:
+   ```bash
+   git push origin master
+   ```
+
+The GitHub Actions workflow will automatically build and deploy your application to Firebase Hosting.
+
+## Troubleshooting
+
+### Next.js Static Export Issues
+
+If you encounter errors when building for static export:
+
+1. Make sure your Next.js config is properly set for static export:
+   ```javascript
+   // next.config.js
+   module.exports = {
+     output: 'export',
+     distDir: 'out',
+     images: {
+       unoptimized: true,
+     },
+     trailingSlash: true,
+   };
+   ```
+
+2. For dynamic routes, ensure you've implemented `generateStaticParams()` in your page components.
+
+3. Check that any server components are properly adapted for static export.
+
+### Firebase Hosting Issues
+
+If your deployment fails:
+
+1. Check that your `firebase.json` file specifies the correct public directory:
+   ```json
+   {
+     "hosting": {
+       "public": "out",
+       "ignore": [
+         "firebase.json",
+         "**/.*",
+         "**/node_modules/**"
+       ],
+       "rewrites": [
+         {
+           "source": "**",
+           "destination": "/index.html"
+         }
+       ]
+     }
+   }
+   ```
+
+2. Verify that your Firebase project has hosting enabled.
+
+3. Check the GitHub Actions logs for specific error messages.
+
+## License
+
+[MIT](LICENSE)
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
