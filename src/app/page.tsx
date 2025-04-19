@@ -14,17 +14,22 @@ export default function Home() {
     // Only redirect after auth check is complete
     if (!isLoading) {
       if (isAuthenticated) {
-        router.push('/dashboard');
+        router.replace('/home');
       } else {
-        router.push('/login');
+        router.replace('/login');
       }
     }
   }, [isAuthenticated, isLoading, router]);
 
   // Show loading while checking auth status
-  return (
-    <Container sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-      <CircularProgress />
-    </Container>
-  );
+  if (isLoading) {
+    return (
+      <Container sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Container>
+    );
+  }
+
+  // Return null as the useEffect will handle redirection
+  return null;
 }

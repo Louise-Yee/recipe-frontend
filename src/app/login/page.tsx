@@ -69,13 +69,14 @@ export default function Login() {
                 <Image
                     src={backgroundImage}
                     alt="Login background"
+                    priority
                     fill
+                    sizes="(max-width: 768px) 0vw, 100vw"
                     style={{
                         objectFit: 'cover',
-                        zIndex: 0,
-
+                        zIndex: 0
                     }}
-                    draggable={false}
+                    quality={90}
                 />
                 <Box
                     sx={{
