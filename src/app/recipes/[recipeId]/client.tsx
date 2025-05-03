@@ -9,6 +9,7 @@ import FavoriteIcon from '@mui/icons-material/Favorite';
 import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
 import { useRouter, usePathname } from 'next/navigation';
 import RecipeImage from '@/components/RecipeImage';
+import { useThemeMode } from '@/context/ThemeContext';
 
 type RecipeClientProps = {
     recipeId: string;
@@ -22,6 +23,11 @@ export default function RecipeClient({ recipeId }: RecipeClientProps) {
     const [notification, setNotification] = useState('');
     const router = useRouter();
     const pathname = usePathname();
+    // const theme = useTheme();
+    const { mode } = useThemeMode();
+
+    // Paper background color based on theme mode
+    const paperBgColor = mode === 'dark' ? 'background.paper' : '#fff8f3';
 
     // Fetch recipe data
     const fetchRecipe = useCallback(async () => {
@@ -93,7 +99,7 @@ export default function RecipeClient({ recipeId }: RecipeClientProps) {
     if (error) {
         return (
             <Container sx={{ py: 4 }}>
-                <Paper sx={{ p: 3, textAlign: 'center' }}>
+                <Paper sx={{ p: 3, textAlign: 'center', bgcolor: paperBgColor }}>
                     <Typography color="error" variant="h6" gutterBottom>
                         Error Loading Recipe
                     </Typography>
@@ -113,7 +119,7 @@ export default function RecipeClient({ recipeId }: RecipeClientProps) {
     if (!recipe) {
         return (
             <Container sx={{ py: 4 }}>
-                <Paper sx={{ p: 3, textAlign: 'center' }}>
+                <Paper sx={{ p: 3, textAlign: 'center', bgcolor: paperBgColor }}>
                     <Typography color="error">Recipe not found</Typography>
                     <Button
                         variant="outlined"
@@ -134,10 +140,10 @@ export default function RecipeClient({ recipeId }: RecipeClientProps) {
                     <IconButton
                         onClick={handleBack}
                         sx={{
-                            bgcolor: 'white',
+                            bgcolor: mode === 'dark' ? 'background.paper' : 'white',
                             boxShadow: 1,
                             '&:hover': {
-                                bgcolor: '#fff8f3'
+                                bgcolor: mode === 'dark' ? 'background.default' : '#fff8f3'
                             }
                         }}
                         aria-label="back"
@@ -148,10 +154,10 @@ export default function RecipeClient({ recipeId }: RecipeClientProps) {
                     <IconButton
                         onClick={toggleFavorite}
                         sx={{
-                            bgcolor: 'white',
+                            bgcolor: mode === 'dark' ? 'background.paper' : 'white',
                             boxShadow: 1,
                             '&:hover': {
-                                bgcolor: '#fff8f3'
+                                bgcolor: mode === 'dark' ? 'background.default' : '#fff8f3'
                             }
                         }}
                         aria-label={isFavorite ? 'remove from favorites' : 'add to favorites'}
@@ -217,7 +223,7 @@ export default function RecipeClient({ recipeId }: RecipeClientProps) {
                     )}
                 </Stack>
 
-                <Paper elevation={0} sx={{ p: 3, mb: 4, bgcolor: '#fff8f3' }}>
+                <Paper elevation={0} sx={{ p: 3, mb: 4, bgcolor: paperBgColor }}>
                     <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
                         Ingredients
                     </Typography>
@@ -233,7 +239,7 @@ export default function RecipeClient({ recipeId }: RecipeClientProps) {
                     </List>
                 </Paper>
 
-                <Paper elevation={0} sx={{ p: 3, bgcolor: '#fff8f3' }}>
+                <Paper elevation={0} sx={{ p: 3, bgcolor: paperBgColor }}>
                     <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
                         Instructions
                     </Typography>
