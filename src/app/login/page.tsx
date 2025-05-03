@@ -15,6 +15,7 @@ import {
 } from '@mui/material';
 import NextLink from 'next/link';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation'; // Added useRouter import
 import { useAuth } from '@/context/AuthContext';
 import { errorHandler } from '@/helper/helper';
 import { Visibility, VisibilityOff, Email, Lock } from '@mui/icons-material';
@@ -23,6 +24,7 @@ export default function Login() {
 
     // const backgroundImage = 
     const { login, isLoading } = useAuth();
+    const router = useRouter(); // Added router
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
@@ -41,6 +43,12 @@ export default function Login() {
             errorHandler(err, 'handleLogin', 'Login');
             setError('Invalid email or password. Please try again.');
         }
+    };
+
+    // Function to handle navigation to signup
+    const handleNavigateToSignup = (e: React.MouseEvent) => {
+        e.preventDefault();
+        router.push('/signup');
     };
 
     return (
@@ -325,8 +333,8 @@ export default function Login() {
                             <Typography variant="body2" color="rgba(0, 0, 0, 0.7)">
                                 Don&apos;t have an account?{' '}
                                 <Link
-                                    component={NextLink}
                                     href="/signup"
+                                    onClick={handleNavigateToSignup} // Added onClick handler
                                     sx={{
                                         color: '#000',
                                         fontWeight: 500,
