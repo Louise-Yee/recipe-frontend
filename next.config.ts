@@ -1,8 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Change from export to standalone output
-  output: "standalone",
+  // Change from standalone to export for static site generation
+  output: "export",
+  // Specify the output directory that matches firebase.json
+  distDir: "out",
   // Disable type checking during build to avoid params type issues
   typescript: {
     ignoreBuildErrors: true,
@@ -15,7 +17,7 @@ const nextConfig: NextConfig = {
         hostname: "**",
       },
     ],
-    unoptimized: true, // Required for export mode but still works with standalone
+    unoptimized: true, // Required for export mode
   },
   trailingSlash: true,
 };
