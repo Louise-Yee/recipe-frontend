@@ -1,13 +1,13 @@
 {
   "hosting": {
-    "public": ".next/standalone",
+    "public": "out",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "cleanUrls": true,
     "trailingSlash": false,
     "rewrites": [
       {
         "source": "**",
-        "function": "nextjsServer"
+        "destination": "/index.html"
       }
     ]
   },
