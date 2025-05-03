@@ -3,7 +3,9 @@
 import './globals.css';
 import MuiProvider from '@/components/MuiProvider';
 import { AuthProvider } from '@/context/AuthContext';
+import { ThemeProvider } from '@/context/ThemeContext';
 import AuthAwareLayout from '@/components/AuthAwareLayout';
+import ThemeToggle from '@/components/ThemeToggle';
 import localFont from 'next/font/local';
 
 const overusedGrotesk = localFont({
@@ -31,11 +33,14 @@ export default function RootLayout({
     <html lang="en" className={overusedGrotesk.variable}>
       <body>
         <AuthProvider>
-          <MuiProvider>
-            <AuthAwareLayout>
-              {children}
-            </AuthAwareLayout>
-          </MuiProvider>
+          <ThemeProvider>
+            <MuiProvider>
+              <AuthAwareLayout>
+                {children}
+                <ThemeToggle />
+              </AuthAwareLayout>
+            </MuiProvider>
+          </ThemeProvider>
         </AuthProvider>
       </body>
     </html>

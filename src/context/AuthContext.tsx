@@ -4,15 +4,15 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { errorHandler } from '@/helper/helper';
-import { auth } from '@/config/firebase'; // Import from config file
+import { auth, useFirebaseAuth } from '@/config/firebase';
 import {
     signInWithEmailAndPassword,
     createUserWithEmailAndPassword,
     signOut,
-    UserCredential
+    UserCredential,
+    setPersistence,
+    browserLocalPersistence
 } from 'firebase/auth';
-
-
 
 // User interface for a recipe sharing platform
 interface User {
@@ -33,24 +33,13 @@ interface AuthContextType {
     isAuthenticated: boolean;
     signUp: (email: string, password: string, username: string, firstName: string, lastName: string) => Promise<void>;
     login: (usernameOrEmail: string, password: string) => Promise<void>;
-    logout: () => void;
+    logout: () => Promise<void>;
     updateProfile: (profileData: Partial<User>) => Promise<void>;
-    checkAuthStatus: () => void;
+    checkAuthStatus: () => Promise<void>;
 }
 
 // Create the context with a default value
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-// Session timeout in milliseconds (1 hour to match backend cookie)
-const SESSION_TIMEOUT = 3600000; // 1 hour
-
-// Local storage keys for better organization
-const STORAGE_KEYS = {
-    AUTH_TOKEN: 'recipePlatform_authToken',
-    USER_DATA: 'recipePlatform_userData',
-    LAST_ACTIVITY: 'recipePlatform_lastActivity',
-    SESSION_EXPIRY: 'recipePlatform_sessionExpiry'
-};
 
 interface AuthProviderProps {
     children: ReactNode;
@@ -61,11 +50,8 @@ const apiUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
 export const AuthProvider = ({ children }: AuthProviderProps) => {
     const [user, setUser] = useState<User | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const { firebaseUser, loading: firebaseLoading } = useFirebaseAuth();
     const router = useRouter();
-
-    const updateLastActivity = () => {
-        localStorage.setItem(STORAGE_KEYS.LAST_ACTIVITY, Date.now().toString());
-    };
 
     // Helper function to determine if input is an email
     const isEmail = (input: string): boolean => {
@@ -74,64 +60,100 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
     // API request helper with auth token
     const authFetch = async (endpoint: string, options: RequestInit = {}) => {
+        // Ensure we have the latest token for each request
+        let headers = { ...options.headers };
+
+        if (auth?.currentUser) {
+            try {
+                const token = await auth.currentUser.getIdToken(true);
+                headers = {
+                    ...headers,
+                    'Authorization': `Bearer ${token}`
+                };
+            } catch (error) {
+                console.error('Failed to get auth token:', error);
+            }
+        }
+
         return fetch(`${apiUrl}${endpoint}`, {
             ...options,
             credentials: 'include', // Send cookies with the request
             headers: {
                 'Content-Type': 'application/json',
-                ...options.headers
+                ...headers
             }
         });
     };
 
-    // Check if session is valid
-    const checkSession = async () => {
+    // Check if session is valid and get user data
+    const fetchUserData = async () => {
         try {
-            const currentUser = auth.currentUser;
-            if (!currentUser) return false;
+            if (!auth?.currentUser) return null;
 
-            const idToken = await currentUser.getIdToken();
+            const idToken = await auth.currentUser.getIdToken(true);
+
             const response = await fetch(`${apiUrl}/auth/session`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                },
                 body: JSON.stringify({ idToken }),
                 credentials: 'include'
             });
 
             if (!response.ok) {
-                throw new Error('Session invalid');
+                throw new Error('Session invalid or expired');
             }
 
             const data = await response.json();
-            setUser(data.user);
-
-            // Update session expiry time
-            const expiryTime = Date.now() + SESSION_TIMEOUT;
-            localStorage.setItem(STORAGE_KEYS.SESSION_EXPIRY, expiryTime.toString());
-
-            return true;
+            return data.user;
         } catch (error) {
-            console.error('Session check failed:', error);
-            return false;
+            console.error('Failed to fetch user data:', error);
+            return null;
         }
     };
 
-    // Check authentication status
-    const checkAuthStatus = async () => {
-        setIsLoading(true);
+    // Sync Firebase auth state with our user state
+    useEffect(() => {
+        const syncUserState = async () => {
+            if (firebaseLoading) return;
 
-        try {
-            const currentUser = auth.currentUser;
+            if (firebaseUser) {
+                try {
+                    const userData = await fetchUserData();
 
-            if (!currentUser) {
+                    if (userData) {
+                        setUser(userData);
+                    } else {
+                        // We have a Firebase user but couldn't get user data
+                        // This could mean the session has expired on backend
+                        await handleLogout();
+                    }
+                } catch (error) {
+                    errorHandler(error, "syncUserState", "AuthContext");
+                    await handleLogout();
+                }
+            } else {
                 setUser(null);
-                setIsLoading(false);
-                return;
             }
 
-            const sessionValid = await checkSession();
-            if (!sessionValid) {
-                await handleLogout();
+            setIsLoading(false);
+        };
+
+        syncUserState();
+    }, [firebaseUser, firebaseLoading]);
+
+    // Check authentication status
+    const checkAuthStatus = async () => {
+        if (!auth) return;
+
+        setIsLoading(true);
+        try {
+            if (auth.currentUser) {
+                const userData = await fetchUserData();
+                setUser(userData);
+            } else {
+                setUser(null);
             }
         } catch (error) {
             errorHandler(error, "checkAuthStatus", "AuthContext");
@@ -143,8 +165,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
     // Handle login with username or email
     const login = async (usernameOrEmail: string, password: string) => {
+        if (!auth) {
+            throw new Error('Firebase auth not initialized');
+        }
+
         setIsLoading(true);
         try {
+            // Set persistence to LOCAL to persist across sessions
+            await setPersistence(auth, browserLocalPersistence);
+
             let userCredential: UserCredential;
 
             if (isEmail(usernameOrEmail)) {
@@ -153,7 +182,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
                 const response = await fetch(`${apiUrl}/users/by-username`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username: usernameOrEmail })
+                    body: JSON.stringify({ username: usernameOrEmail }),
+                    credentials: 'include'
                 });
 
                 if (!response.ok) {
@@ -179,9 +209,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
             const userData = await sessionResponse.json();
             setUser(userData.user);
-            updateLastActivity();
 
-            router.replace("/home"); // Use replace instead of push
+            // Navigate using router.push with a slight delay to allow state updates
+            setTimeout(() => {
+                router.push("/home");
+            }, 100);
         } catch (error) {
             errorHandler(error, "login", "AuthContext");
             throw error;
@@ -198,17 +230,21 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         firstName: string,
         lastName: string
     ) => {
+        if (!auth) {
+            throw new Error('Firebase auth not initialized');
+        }
+
         setIsLoading(true);
         try {
+            // Set persistence to LOCAL
+            await setPersistence(auth, browserLocalPersistence);
+
             // Create user in Firebase Auth
             const userCredential = await createUserWithEmailAndPassword(auth, email, password);
             const firebaseUser = userCredential.user;
 
             // Get ID token
             const idToken = await firebaseUser.getIdToken();
-
-            // Store token temporarily
-            localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, idToken);
 
             // Create user profile in your backend
             const displayName = `${firstName} ${lastName}`.trim();
@@ -221,12 +257,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
                 },
                 body: JSON.stringify({
                     email,
-                    password,
                     username,
                     firstName,
                     lastName,
                     displayName
-                })
+                }),
+                credentials: 'include'
             });
 
             if (!response.ok) {
@@ -241,7 +277,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
                 throw new Error(errorData.error || 'Failed to create user profile');
             }
 
-            // const data = await response.json();
+            const data = await response.json();
 
             const newUser: User = {
                 uid: firebaseUser.uid,
@@ -252,15 +288,16 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
                 bio: '',
                 followersCount: 0,
                 followingCount: 0,
-                recipesCount: 0
+                recipesCount: 0,
+                ...data.user
             };
 
-            // Store user data
-            localStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(newUser));
-            updateLastActivity();
-
             setUser(newUser);
-            router.push("/home"); // or "/onboarding" if you have that route
+
+            // Navigate with a slight delay
+            setTimeout(() => {
+                router.push("/home");
+            }, 100);
         } catch (error) {
             errorHandler(error, "signUp", "AuthContext");
             throw error;
@@ -286,13 +323,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             const updatedData = await response.json();
 
             // Update local user state with new data
-            const updatedUser = { ...user, ...updatedData };
+            const updatedUser = { ...user, ...updatedData.user };
             setUser(updatedUser);
-
-            // Update localStorage
-            localStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(updatedUser));
-            updateLastActivity();
-
             return updatedUser;
         } catch (error) {
             errorHandler(error, "updateProfile", "AuthContext");
@@ -305,85 +337,58 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     // Handle logout (internal function)
     const handleLogout = async () => {
         try {
-            await signOut(auth);
+            if (auth) {
+                await signOut(auth);
+            }
+
+            // Also call the backend logout endpoint
             await fetch(`${apiUrl}/auth/logout`, {
                 method: 'POST',
                 credentials: 'include'
             });
-            localStorage.clear(); // Clear all storage to be safe
+
             setUser(null);
         } catch (error) {
             console.error("Error signing out:", error);
+            // Still clear the user state even if logout fails
+            setUser(null);
         }
     };
 
     // Public logout function
-    const logout = () => {
-        handleLogout();
-        router.replace("/login"); // Use replace instead of push
+    const logout = async () => {
+        await handleLogout();
+        router.push("/login");
     };
 
-    // Initialize auth check and keep it updated
-    useEffect(() => {
-        let authStateUnsubscribe = () => { };
-
-        const setupAuthListener = () => {
-            authStateUnsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
-                if (firebaseUser) {
-                    await checkAuthStatus();
-                } else {
-                    setUser(null);
-                    setIsLoading(false);
-                }
-            });
-        };
-
-        setupAuthListener();
-        return () => authStateUnsubscribe();
-    }, []);
-
-    // Set up activity tracking to update last activity time
+    // Keep session alive
     useEffect(() => {
         if (!user) return;
 
-        const handleActivity = () => {
-            updateLastActivity();
-        };
-
-        // Add event listeners for user activity
-        window.addEventListener('mousedown', handleActivity);
-        window.addEventListener('keydown', handleActivity);
-        window.addEventListener('touchstart', handleActivity);
-        window.addEventListener('scroll', handleActivity);
-
-        // Check session validity every minute
-        const intervalId = setInterval(async () => {
-            const sessionExpiry = localStorage.getItem(STORAGE_KEYS.SESSION_EXPIRY);
-            const currentTime = Date.now();
-
-            // If session is about to expire in 5 minutes or has expired, check session
-            if (sessionExpiry && (currentTime + 300000 > parseInt(sessionExpiry))) {
-                const isValid = await checkSession();
-                if (!isValid) {
-                    console.log('Session expired, logging out');
-                    logout();
+        const refreshTokenInterval = setInterval(async () => {
+            try {
+                // Refresh token and session
+                if (auth?.currentUser) {
+                    const token = await auth.currentUser.getIdToken(true);
+                    await fetch(`${apiUrl}/auth/refresh`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ idToken: token }),
+                        credentials: 'include'
+                    });
                 }
+            } catch (error) {
+                console.error('Failed to refresh token:', error);
             }
-        }, 60000); // Check every minute
+        }, 10 * 60 * 1000); // Every 10 minutes
 
-        return () => {
-            window.removeEventListener('mousedown', handleActivity);
-            window.removeEventListener('keydown', handleActivity);
-            window.removeEventListener('touchstart', handleActivity);
-            window.removeEventListener('scroll', handleActivity);
-            clearInterval(intervalId);
-        };
+        return () => clearInterval(refreshTokenInterval);
     }, [user]);
 
     // Provide the context value
     const contextValue: AuthContextType = {
         user,
-        isLoading,
+        isLoading: isLoading || firebaseLoading,
         isAuthenticated: !!user,
         signUp,
         login,
