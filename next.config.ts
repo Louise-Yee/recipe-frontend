@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Adding output: 'export' to generate static files
-  output: "export",
+  // Change from export to standalone output
+  output: "standalone",
   // Disable type checking during build to avoid params type issues
   typescript: {
     ignoreBuildErrors: true,
@@ -15,7 +15,7 @@ const nextConfig: NextConfig = {
         hostname: "**",
       },
     ],
-    unoptimized: true, // Required for static export
+    unoptimized: true, // Required for export mode but still works with standalone
   },
   trailingSlash: true,
 };
